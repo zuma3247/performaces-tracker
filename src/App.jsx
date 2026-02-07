@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { PlusCircle, Mic, Music, Smile, User, Ticket, Trash2 } from 'lucide-react'
+import { WelcomeModal } from './components/WelcomeModal'
 
 // Utility to generate IDs
 const generateId = () => Math.random().toString(36).substr(2, 9)
@@ -21,6 +22,11 @@ function App() {
     return saved ? JSON.parse(saved) : null
   })
 
+  const [showWelcome, setShowWelcome] = useState(() => {
+    const hasSeen = localStorage.getItem('openMicHasSeenWelcome')
+    return !hasSeen
+  })
+
   // Input State
   const [newName, setNewName] = useState('')
   const [newPiece, setNewPiece] = useState('')
@@ -32,6 +38,11 @@ function App() {
     localStorage.setItem('openMicQueue', JSON.stringify(queue))
     localStorage.setItem('openMicCurrent', JSON.stringify(currentPerformer))
   }, [performers, queue, currentPerformer])
+
+  const handleCloseWelcome = () => {
+    setShowWelcome(false)
+    localStorage.setItem('openMicHasSeenWelcome', 'true')
+  }
 
   // Logic
   const calculateTickets = (count) => {
@@ -143,6 +154,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-webster-gold selection:text-webster-blue">
+      <WelcomeModal isOpen={showWelcome} onClose={handleCloseWelcome} />
       <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6 sm:space-y-8">
 
         {/* Header */}
