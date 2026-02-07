@@ -1,1 +1,6 @@
 @import "tailwindcss";
+
+@theme {
+    --color-webster-blue: #024890;
+    --color-webster-gold: #f5b706;
+}
