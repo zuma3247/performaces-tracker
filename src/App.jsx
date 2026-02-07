@@ -215,9 +215,15 @@ function App() {
                   type="text"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
+                  list="performer-names"
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-webster-gold text-slate-900 placeholder-slate-400 transition"
                   placeholder="Enter performer name..."
                 />
+                <datalist id="performer-names">
+                  {[...new Set(performers.map(p => p.name))].sort().map(name => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">Piece (Optional)</label>
