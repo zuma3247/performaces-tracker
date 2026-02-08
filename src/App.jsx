@@ -315,7 +315,7 @@ function App() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Perfs</div>
+                        <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Count</div>
                         <div className="font-mono font-bold text-webster-blue text-lg leading-none">{pData?.count || 0}</div>
                       </div>
                     </div>
