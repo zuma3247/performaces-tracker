@@ -336,13 +336,12 @@ function App() {
                   <th className="pb-3 pl-2">Performer</th>
                   <th className="pb-3 text-center">Performances</th>
                   <th className="pb-3 text-center">Total Tickets</th>
-                  <th className="pb-3 text-right pr-2">Last Seen</th>
                 </tr>
               </thead>
               <tbody className="text-slate-700">
                 {performers.length === 0 ? (
                   <tr>
-                    <td colSpan="4" className="py-8 text-center text-slate-500 bg-slate-50 rounded-lg mt-2 ">No performers yet.</td>
+                    <td colSpan="3" className="py-8 text-center text-slate-500 bg-slate-50 rounded-lg mt-2 ">No performers yet.</td>
                   </tr>
                 ) : (
                   [...performers].sort((a, b) => b.count - a.count).map(p => (
@@ -358,9 +357,6 @@ function App() {
                           <Ticket className="w-4 h-4" />
                           {calculateTickets(p.count)}
                         </div>
-                      </td>
-                      <td className="py-4 text-right pr-2 text-sm text-slate-400 font-medium">
-                        {p.lastPerformed ? new Date(p.lastPerformed).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Never'}
                       </td>
                     </tr>
                   ))
