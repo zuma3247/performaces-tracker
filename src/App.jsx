@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { PlusCircle, Mic, Music, Smile, User, Ticket, Trash2, Moon, Sun } from 'lucide-react'
+import { PlusCircle, Mic, Music, Smile, User, Ticket, Trash2, Moon, Sun, Sparkles } from 'lucide-react'
 import { WelcomeModal } from './components/WelcomeModal'
+import { Toast } from './components/Toast'
 
 // Utility to generate IDs
 const generateId = () => Math.random().toString(36).substr(2, 9)
@@ -26,6 +27,8 @@ function App() {
     const hasSeen = localStorage.getItem('openMicHasSeenWelcome')
     return !hasSeen
   })
+
+  const [toast, setToast] = useState(null)
 
   // Theme State
   const [theme, setTheme] = useState(() => {
@@ -67,6 +70,10 @@ function App() {
     localStorage.setItem('openMicHasSeenWelcome', 'true')
   }
 
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type, id: Date.now() })
+  }
+
   // Logic
   const calculateTickets = (count) => {
     const tickets = count * 2
@@ -93,7 +100,7 @@ function App() {
 
     // Check if already in queue or current
     if (queue.find(q => q.performerId === performer.id) || (currentPerformer && currentPerformer.performerId === performer.id)) {
-      alert(`${performer.name} is already in the queue or performing!`)
+      showToast(`${performer.name} is already in the queue or performing!`, 'error')
       return
     }
 
@@ -110,6 +117,7 @@ function App() {
     setQueue([...queue, queueItem])
     setNewName('')
     setNewPiece('')
+    showToast(`${performer.name} added to the queue!`)
   }
 
   // Priority Queue Logic
@@ -163,6 +171,7 @@ function App() {
       localStorage.removeItem('openMicPerformers')
       localStorage.removeItem('openMicQueue')
       localStorage.removeItem('openMicCurrent')
+      showToast('Event reset successfully.', 'info')
     }
   }
 
@@ -178,28 +187,30 @@ function App() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans selection:bg-webster-gold selection:text-webster-blue transition-colors duration-200">
       <WelcomeModal isOpen={showWelcome} onClose={handleCloseWelcome} />
+      {toast && <Toast key={toast.id} message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
       <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6 sm:space-y-8">
 
         {/* Header */}
-        <header className="flex flex-col sm:flex-row items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-6 text-center sm:text-left gap-4">
-          <div>
+        <header className="flex flex-col sm:flex-row items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-6 gap-4">
+          <div className="text-center sm:text-left">
             <h1 className="text-2xl sm:text-3xl font-bold text-webster-blue dark:text-webster-gold">
               Performances Tracker
             </h1>
-            <p className="text-slate-500 dark:text-slate-400 mt-1 text-sm sm:text-base font-medium">Poetry • Karaoke • Comedy</p>
+            <p className="text-slate-500 dark:text-slate-400 mt-1 text-sm sm:text-base font-medium hidden sm:block">Poetry • Karaoke • Comedy</p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto justify-between sm:justify-end">
+            <div className="flex flex-row sm:flex-col items-center gap-2 sm:gap-0 bg-slate-100 dark:bg-slate-800 px-3 py-2 sm:p-0 rounded-lg sm:rounded-none">
+              <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 uppercase tracking-wider font-bold">Total</div>
+              <div className="text-lg sm:text-2xl font-bold text-webster-blue dark:text-webster-gold sm:text-right">{performers.length}</div>
+            </div>
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-600 transition"
+              className="p-2 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-600 transition ring-offset-2 focus:ring-2 ring-webster-gold outline-none"
               aria-label="Toggle Dark Mode"
             >
               {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
             </button>
-            <div className="flex flex-row sm:flex-col items-center gap-2 sm:gap-0 bg-slate-100 dark:bg-slate-800 px-4 py-2 sm:p-0 rounded-full sm:rounded-none">
-              <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 uppercase tracking-wider font-bold">Total Performers</div>
-              <div className="text-lg sm:text-2xl font-bold text-webster-blue dark:text-webster-gold sm:text-right">{performers.length}</div>
-            </div>
           </div>
         </header>
 
@@ -323,8 +334,10 @@ function App() {
 
             <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar flex-1">
               {sortedQueue.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 dark:text-slate-500 italic bg-slate-50 dark:bg-slate-900 rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700">
-                  The queue is empty.
+                <div className="flex flex-col items-center justify-center py-12 text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-900 rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700">
+                  <Sparkles className="w-10 h-10 mb-3 text-slate-300 dark:text-slate-600" />
+                  <p className="font-medium">The queue is empty!</p>
+                  <p className="text-sm opacity-75">Be the first to perform.</p>
                 </div>
               ) : (
                 sortedQueue.map((item, index) => {
