@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { PlusCircle, Mic, Music, Smile, User, Ticket, Trash2, Moon, Sun, Sparkles } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { PlusCircle, Mic, Music, Smile, User, Ticket, Trash2, Moon, Sun, Sparkles, X, Plus, Minus } from 'lucide-react'
 import { WelcomeModal } from './components/WelcomeModal'
 import { Toast } from './components/Toast'
 
@@ -39,16 +39,42 @@ function App() {
   })
 
   // Input State
-  const [newName, setNewName] = useState('')
+  const [newNames, setNewNames] = useState(['']) // Array for duets/groups
   const [newPiece, setNewPiece] = useState('')
   const [newType, setNewType] = useState('Poetry')
 
-  // Persistence
+  // --- PERSISTENCE (Split to prevent monolithic wipes) ---
   useEffect(() => {
     localStorage.setItem('openMicPerformers', JSON.stringify(performers))
+  }, [performers])
+
+  useEffect(() => {
     localStorage.setItem('openMicQueue', JSON.stringify(queue))
+  }, [queue])
+
+  useEffect(() => {
     localStorage.setItem('openMicCurrent', JSON.stringify(currentPerformer))
-  }, [performers, queue, currentPerformer])
+  }, [currentPerformer])
+
+  // --- CROSS-TAB SYNC ---
+  useEffect(() => {
+    const handleStorage = (e) => {
+      if (e.key === 'openMicPerformers') {
+        const newData = e.newValue ? JSON.parse(e.newValue) : []
+        setPerformers(newData)
+      }
+      if (e.key === 'openMicQueue') {
+        const newData = e.newValue ? JSON.parse(e.newValue) : []
+        setQueue(newData)
+      }
+      if (e.key === 'openMicCurrent') {
+        const newData = e.newValue ? JSON.parse(e.newValue) : null
+        setCurrentPerformer(newData)
+      }
+    }
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
+  }, [])
 
   // Theme Logic
   useEffect(() => {
@@ -75,59 +101,115 @@ function App() {
   }
 
   // Logic
-  const calculateTickets = (count) => {
-    const tickets = count * 2
-    return Math.min(tickets, 7)
+  const calculateTickets = (perfCount, bonus = 0) => {
+    const tickets = (perfCount * 2) + bonus
+    return Math.max(0, Math.min(tickets, 7 + Math.max(0, bonus))) // Base cap is 7, bonus allows exceeding if needed
+  }
+
+  const handleNameChange = (index, value) => {
+    const updatedNames = [...newNames]
+    updatedNames[index] = value
+    setNewNames(updatedNames)
+  }
+
+  const addNameInput = () => {
+    setNewNames([...newNames, ''])
+  }
+
+  const removeNameInput = (index) => {
+    const updatedNames = newNames.filter((_, i) => i !== index)
+    setNewNames(updatedNames)
+  }
+
+  // Action Locks to prevent double-execution side-effects
+  const actionLockRef = useRef(false)
+  const setWithLock = (callback) => {
+    if (actionLockRef.current) return
+    actionLockRef.current = true
+    callback()
+    setTimeout(() => { actionLockRef.current = false }, 300)
   }
 
   const addToQueue = (e) => {
     e.preventDefault()
-    if (!newName.trim()) return
 
-    // Check if performer already exists in history
-    let performer = performers.find(p => p.name.toLowerCase() === newName.trim().toLowerCase())
+    const validNames = newNames.map(n => n.trim()).filter(n => n !== '')
+    if (validNames.length === 0) return
 
-    if (!performer) {
-      // Create new performer
-      performer = {
-        id: generateId(),
-        name: newName.trim(),
-        type: newType,
-        count: 0
+    setWithLock(() => {
+      let updatedPerformers = [...performers]
+      const queuePerformers = []
+
+      for (const name of validNames) {
+        let performer = updatedPerformers.find(p => p.name.toLowerCase() === name.toLowerCase())
+        if (!performer) {
+          performer = {
+            id: generateId(),
+            name: name,
+            type: newType,
+            count: 0,
+            bonusTickets: 0
+          }
+          updatedPerformers.push(performer)
+        }
+        queuePerformers.push({ id: performer.id, name: performer.name })
       }
-      setPerformers([...performers, performer])
-    }
 
-    // Check if already in queue or current
-    if (queue.find(q => q.performerId === performer.id) || (currentPerformer && currentPerformer.performerId === performer.id)) {
-      showToast(`${performer.name} is already in the queue or performing!`, 'error')
-      return
-    }
+      // Validation against queue
+      for (const p of queuePerformers) {
+        const inQueue = queue.find(q => q.queuePerformers?.some(qp => qp.id === p.id) || q.performerId === p.id)
+        const isCurrent = currentPerformer && (currentPerformer.queuePerformers?.some(qp => qp.id === p.id) || currentPerformer.performerId === p.id)
+        if (inQueue || isCurrent) {
+          showToast(`${p.name} is already in the queue or performing!`, 'error')
+          return
+        }
+      }
 
-    const queueItem = {
-      id: generateId(),
-      performerId: performer.id,
-      name: performer.name,
-      type: newType,
-      piece: newPiece.trim(),
-      count: performer.count,
-      timestamp: Date.now()
-    }
+      const queueItem = {
+        id: generateId(),
+        queuePerformers: queuePerformers,
+        type: newType,
+        piece: newPiece.trim(),
+        timestamp: Date.now()
+      }
 
-    setQueue([...queue, queueItem])
-    setNewName('')
-    setNewPiece('')
-    showToast(`${performer.name} added to the queue!`)
+      setPerformers(updatedPerformers)
+      setQueue([...queue, queueItem])
+
+      setNewNames([''])
+      setNewPiece('')
+      showToast(`${validNames.join(' & ')} added to the queue!`)
+    })
+  }
+
+  const removeFromQueue = (queueId) => {
+    setQueue(prevQueue => {
+      const itemList = prevQueue.find(q => q.id === queueId)
+      if (itemList) {
+        const names = itemList.queuePerformers ? itemList.queuePerformers.map(p => p.name).join(' & ') : itemList.name
+        showToast(`${names} removed from queue.`, 'info')
+      }
+      return prevQueue.filter(q => q.id !== queueId)
+    })
   }
 
   // Priority Queue Logic
   const getSortedQueue = () => {
     return [...queue].sort((a, b) => {
-      const perfA = performers.find(p => p.id === a.performerId)
-      const perfB = performers.find(p => p.id === b.performerId)
+      // Find max count among the group for fair prioritization
+      const getQueueCount = (queueItem) => {
+        if (queueItem.queuePerformers) {
+          const counts = queueItem.queuePerformers.map(qp => performers.find(p => p.id === qp.id)?.count || 0)
+          return Math.max(...counts, 0) // Max count dictates priority (least fair)
+        } else {
+          // Legacy fallback
+          const perf = performers.find(p => p.id === queueItem.performerId)
+          return perf ? perf.count : 0
+        }
+      }
 
-      const countA = perfA ? perfA.count : 0
-      const countB = perfB ? perfB.count : 0
+      const countA = getQueueCount(a)
+      const countB = getQueueCount(b)
 
       if (countA !== countB) return countA - countB
       return a.timestamp - b.timestamp
@@ -138,29 +220,56 @@ function App() {
 
   const startNext = () => {
     if (sortedQueue.length === 0) return
-    const next = sortedQueue[0]
-    setCurrentPerformer({
-      ...next,
-      startTime: Date.now()
+    setWithLock(() => {
+      const next = sortedQueue[0]
+      setCurrentPerformer({
+        ...next,
+        startTime: Date.now()
+      })
+      setQueue(prev => prev.filter(q => q.id !== next.id))
     })
-    setQueue(queue.filter(q => q.id !== next.id))
   }
 
   const finishPerformance = () => {
     if (!currentPerformer) return
 
-    setPerformers(prev => prev.map(p => {
-      if (p.id === currentPerformer.performerId) {
-        return {
-          ...p,
-          count: p.count + 1,
-          lastPerformed: Date.now()
+    setWithLock(() => {
+      setPerformers(prev => prev.map(p => {
+        // Check if this performer is in the current performing group
+        const inCurrentGroup = currentPerformer.queuePerformers
+          ? currentPerformer.queuePerformers.some(qp => qp.id === p.id)
+          : currentPerformer.performerId === p.id // Legacy fallback
+
+        if (inCurrentGroup) {
+          return {
+            ...p,
+            count: p.count + 1,
+            lastPerformed: Date.now()
+          }
         }
+        return p
+      }))
+
+      setCurrentPerformer(null)
+    })
+  }
+
+  const adjustManualCount = (performerId, amount) => {
+    setPerformers(prev => prev.map(p => {
+      if (p.id === performerId) {
+        return { ...p, count: Math.max(0, p.count + amount) }
       }
       return p
     }))
+  }
 
-    setCurrentPerformer(null)
+  const adjustManualBonus = (performerId, amount) => {
+    setPerformers(prev => prev.map(p => {
+      if (p.id === performerId) {
+        return { ...p, bonusTickets: (p.bonusTickets || 0) + amount }
+      }
+      return p
+    }))
   }
 
   const resetEvent = () => {
@@ -168,9 +277,7 @@ function App() {
       setPerformers([])
       setQueue([])
       setCurrentPerformer(null)
-      localStorage.removeItem('openMicPerformers')
-      localStorage.removeItem('openMicQueue')
-      localStorage.removeItem('openMicCurrent')
+      // localStorage is now handled by the separate useEffects
       showToast('Event reset successfully.', 'info')
     }
   }
@@ -182,6 +289,13 @@ function App() {
       case 'Comedy': return <Smile className="w-4 h-4" />
       default: return <User className="w-4 h-4" />
     }
+  }
+
+  const renderGroupNames = (item) => {
+    if (item.queuePerformers && item.queuePerformers.length > 0) {
+      return item.queuePerformers.map(p => p.name).join(' & ')
+    }
+    return item.name // Legacy
   }
 
   return (
@@ -228,7 +342,7 @@ function App() {
                     {getTypeIcon(currentPerformer.type)}
                     {currentPerformer.type}
                   </span>
-                  <h2 className="text-4xl font-bold text-white mb-1">{currentPerformer.name}</h2>
+                  <h2 className="text-3xl sm:text-4xl font-bold text-white mb-1">{renderGroupNames(currentPerformer)}</h2>
                   {currentPerformer.piece && <p className="text-lg text-slate-300 italic mb-2">"{currentPerformer.piece}"</p>}
                   <p className="text-slate-400 animate-pulse text-sm uppercase tracking-widest font-bold">Now Performing...</p>
                 </div>
@@ -242,13 +356,13 @@ function App() {
             ) : (
               <div className="flex-1 text-center py-4 relative z-10">
                 <h2 className="text-2xl font-bold text-white/90">Stage is Empty</h2>
-                <p className="text-slate-300">Waiting for the next performer...</p>
+                <p className="text-slate-300">Waiting for the next act...</p>
                 {sortedQueue.length > 0 && (
                   <button
                     onClick={startNext}
                     className="mt-4 px-6 py-2 bg-webster-gold text-webster-blue font-bold rounded-lg hover:shadow-lg hover:scale-105 transition"
                   >
-                    Call Next: {sortedQueue[0].name}
+                    Call Next: {renderGroupNames(sortedQueue[0])}
                   </button>
                 )}
               </div>
@@ -261,25 +375,45 @@ function App() {
           <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
             <h3 className="text-xl font-bold mb-4 flex items-center gap-2 text-webster-blue dark:text-webster-gold">
               <PlusCircle className="text-webster-gold" />
-              Sign Up Performer
+              Sign Up Act
             </h3>
             <form onSubmit={addToQueue} className="space-y-4">
-              <div>
-                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Name</label>
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  list="performer-names"
-                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-webster-gold text-slate-900 dark:text-slate-100 placeholder-slate-400 transition"
-                  placeholder="Enter performer name..."
-                />
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">Performers</label>
+                  {newNames.length < 5 && (
+                    <button type="button" onClick={addNameInput} className="text-xs text-webster-blue dark:text-webster-gold font-bold flex items-center gap-1 hover:underline">
+                      <Plus className="w-3 h-3" /> Add Co-Performer
+                    </button>
+                  )}
+                </div>
+
+                {newNames.map((name, index) => (
+                  <div key={index} className="flex items-center gap-2 relative">
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => handleNameChange(index, e.target.value)}
+                      list="performer-names"
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-webster-gold text-slate-900 dark:text-slate-100 placeholder-slate-400 transition"
+                      placeholder={index === 0 ? "Enter main performer name..." : "Enter co-performer name..."}
+                    />
+                    {newNames.length > 1 && (
+                      <button type="button" onClick={() => removeNameInput(index)} className="absolute right-3 text-slate-400 hover:text-red-500 transition-colors bg-slate-50 dark:bg-slate-900">
+                        <X className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+
                 <datalist id="performer-names">
                   {[...new Set(performers.map(p => p.name))].sort().map(name => (
                     <option key={name} value={name} />
                   ))}
                 </datalist>
               </div>
+
               <div>
                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Piece (Optional)</label>
                 <input
@@ -310,7 +444,7 @@ function App() {
               </div>
               <button
                 type="submit"
-                disabled={!newName.trim()}
+                disabled={!newNames[0].trim()}
                 className="w-full py-3.5 sm:py-3 bg-webster-blue hover:bg-blue-900 text-white font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-lg text-lg sm:text-base border-b-4 border-blue-900 active:border-b-0 active:translate-y-1"
               >
                 Add to Queue
@@ -319,7 +453,7 @@ function App() {
           </div>
 
           {/* Queue List */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col transition-colors">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col transition-colors max-h-[640px]">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-bold flex items-center gap-2 text-webster-blue dark:text-webster-gold">
                 <span className="flex items-center justify-center w-6 h-6 rounded-full bg-webster-gold text-webster-blue text-xs font-bold">
@@ -332,7 +466,7 @@ function App() {
               </span>
             </div>
 
-            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar flex-1">
+            <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar flex-1">
               {sortedQueue.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-900 rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700">
                   <Sparkles className="w-10 h-10 mb-3 text-slate-300 dark:text-slate-600" />
@@ -341,28 +475,43 @@ function App() {
                 </div>
               ) : (
                 sortedQueue.map((item, index) => {
-                  const pData = performers.find(p => p.id === item.performerId)
-                  const isNew = pData?.count === 0
+
+                  // Calculate max count for display logic
+                  let maxCount = 0
+                  if (item.queuePerformers) {
+                    const counts = item.queuePerformers.map(qp => performers.find(p => p.id === qp.id)?.count || 0)
+                    maxCount = Math.max(...counts, 0)
+                  } else {
+                    maxCount = performers.find(p => p.id === item.performerId)?.count || 0
+                  }
+
+                  const isNew = maxCount === 0
+
                   return (
-                    <div key={item.id} className="flex items-center justify-between bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-webster-gold dark:hover:border-webster-gold transition group">
-                      <div className="flex items-center gap-3">
+                    <div key={item.id} className="relative flex items-center justify-between bg-slate-50 dark:bg-slate-900 pr-10 pl-3 py-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-webster-gold dark:hover:border-webster-gold transition group">
+                      <div className="flex items-center gap-3 w-full">
                         <div className="font-mono text-slate-400 dark:text-slate-500 text-sm font-bold min-w-[20px]">#{index + 1}</div>
-                        <div>
-                          <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                            {item.name}
-                            {isNew && <span className="text-[10px] bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider border border-green-200 dark:border-green-800">New</span>}
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-slate-800 dark:text-slate-200 flex flex-wrap items-center gap-2">
+                            <span className="truncate">{renderGroupNames(item)}</span>
+                            {isNew && <span className="text-[10px] bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider border border-green-200 dark:border-green-800 flex-shrink-0">New</span>}
                           </div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
-                            <span className="flex items-center gap-1 font-medium">{getTypeIcon(item.type)} {item.type}</span>
+                          <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 mt-0.5">
+                            <span className="flex items-center gap-1 font-medium whitespace-nowrap">{getTypeIcon(item.type)} {item.type}</span>
                             {item.piece && <span className="hidden sm:inline text-slate-300 dark:text-slate-600">•</span>}
-                            {item.piece && <span className="italic text-slate-600 dark:text-slate-400">"{item.piece}"</span>}
+                            {item.piece && <span className="italic text-slate-600 dark:text-slate-400 truncate">"{item.piece}"</span>}
                           </div>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500 font-bold">Count</div>
-                        <div className="font-mono font-bold text-webster-blue dark:text-webster-gold text-lg leading-none">{pData?.count || 0}</div>
-                      </div>
+
+                      {/* Delete Button */}
+                      <button
+                        onClick={() => removeFromQueue(item.id)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                        title="Remove from Queue"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   )
                 })
@@ -373,34 +522,44 @@ function App() {
 
         {/* Leaderboard / Performer History */}
         <div className="bg-white dark:bg-slate-800 rounded-xl p-8 border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
-          <h3 className="text-xl font-bold mb-6 text-webster-blue dark:text-webster-gold">Performer Stats</h3>
+          <h3 className="text-xl font-bold mb-6 text-webster-blue dark:text-webster-gold">Performer Stats & Adjustments</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider font-bold border-b-2 border-slate-100 dark:border-slate-700">
                 <tr>
-                  <th className="pb-3 pl-2">Performer</th>
-                  <th className="pb-3 text-center">Performances</th>
-                  <th className="pb-3 text-center">Total Tickets</th>
+                  <th className="pb-3 pl-2 min-w-[120px]">Performer</th>
+                  <th className="pb-3 text-center min-w-[120px]">Performances</th>
+                  <th className="pb-3 text-center min-w-[140px]">Total Tickets</th>
                 </tr>
               </thead>
               <tbody className="text-slate-700 dark:text-slate-300">
                 {performers.length === 0 ? (
                   <tr>
-                    <td colSpan="3" className="py-8 text-center text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900 rounded-lg mt-2 ">No performers yet.</td>
+                    <td colSpan="3" className="py-8 text-center text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900 rounded-lg mt-2 " border="0">No performers yet.</td>
                   </tr>
                 ) : (
                   [...performers].sort((a, b) => b.count - a.count).map(p => (
                     <tr key={p.id} className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition">
-                      <td className="py-4 pl-2 font-bold text-slate-800 dark:text-slate-200">{p.name}</td>
-                      <td className="py-4 text-center">
-                        <span className="inline-block px-2.5 py-1 bg-slate-100 dark:bg-slate-900 rounded-md font-mono text-sm font-bold text-webster-blue dark:text-webster-gold">
-                          {p.count}
-                        </span>
+                      <td className="py-3 pl-2 font-bold text-slate-800 dark:text-slate-200 break-words">{p.name}</td>
+
+                      {/* Performance Adjuster */}
+                      <td className="py-3 text-center">
+                        <div className="inline-flex items-center bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm">
+                          <button onClick={() => adjustManualCount(p.id, -1)} className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition-colors rounded-l-lg hover:text-red-500" title="Decrease Count"><Minus className="w-3.5 h-3.5" /></button>
+                          <span className="w-8 font-mono text-sm font-bold text-webster-blue dark:text-webster-gold text-center">{p.count}</span>
+                          <button onClick={() => adjustManualCount(p.id, 1)} className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition-colors rounded-r-lg hover:text-green-500" title="Increase Count"><Plus className="w-3.5 h-3.5" /></button>
+                        </div>
                       </td>
-                      <td className="py-4 text-center">
-                        <div className="inline-flex items-center gap-1 text-amber-500 font-bold justify-center bg-amber-50 dark:bg-amber-900/30 px-2 py-1 rounded-full border border-amber-100 dark:border-amber-800">
-                          <Ticket className="w-4 h-4" />
-                          {calculateTickets(p.count)}
+
+                      {/* Ticket Adjuster */}
+                      <td className="py-3 text-center">
+                        <div className="inline-flex items-center bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-lg shadow-sm">
+                          <button onClick={() => adjustManualBonus(p.id, -1)} className="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-600 dark:text-amber-500 transition-colors rounded-l-lg" title="Decrease Bonus Tickets"><Minus className="w-3.5 h-3.5" /></button>
+                          <div className="w-12 inline-flex items-center gap-1 justify-center font-bold text-amber-600 dark:text-amber-500">
+                            <Ticket className="w-3 h-3" />
+                            {calculateTickets(p.count, p.bonusTickets || 0)}
+                          </div>
+                          <button onClick={() => adjustManualBonus(p.id, 1)} className="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-600 dark:text-amber-500 transition-colors rounded-r-lg" title="Increase Bonus Tickets"><Plus className="w-3.5 h-3.5" /></button>
                         </div>
                       </td>
                     </tr>
